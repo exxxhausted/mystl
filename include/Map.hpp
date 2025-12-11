@@ -4,15 +4,14 @@
 #include <functional>
 #include <stdexcept>
 
-// CURRENT VERSION v0.0.5
-// TODO TO FINISH: TREE OUTPUT, std::map OTHER METHODS
+// CURRENT VERSION v0.1.0
 
 namespace mystl {
 
 template<
-    typename Key,
-    typename T,
-    typename Compare = std::less<Key>,
+    typename Key,//         -----------  ПОДМЕНА АЛЛОКАТОРА И КОМПАРАТОРА НЕ ТЕСТИРОВАЛАСЬ
+    typename T, //         \|/                          /
+    typename Compare = std::less<Key>,  //           |/_
     typename Allocator = std::allocator<std::pair<const Key, T>>
     >
 class Map {
@@ -1492,7 +1491,6 @@ public:
      * @brief clear - очистка контейнера
      */
     void clear() noexcept { cleaner(imaginary_->left_); size_ = 0; }
-
 };
 
 }

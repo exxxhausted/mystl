@@ -5,6 +5,10 @@
 #include <stdexcept>
 #include <initializer_list>
 #include <concepts>
+
+// CURRENT VERSION v0.1.0
+
+
                                          /* ПОДМЕНА АЛЛОКАТОРА НЕ ТЕСТИРОВАЛАСЬ */
 namespace mystl {         //                            /
                           //                          |/_
