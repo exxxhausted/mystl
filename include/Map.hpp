@@ -4,13 +4,17 @@
 #include <functional>
 #include <stdexcept>
 
-// CURRENT VERSION v0.1.0
+// CURRENT VERSION v0.1.1
+
+// CHANGELOG:
+// > Исправлена критическая ошибка алгоритма удаления
+// > Добавлены конструкторы от диапазона и std::initializer_list
 
 namespace mystl {
 
 template<
     typename Key,//         -----------  ПОДМЕНА АЛЛОКАТОРА И КОМПАРАТОРА НЕ ТЕСТИРОВАЛАСЬ
-    typename T, //         \|/                          /
+    typename T,  //        \|/                         /
     typename Compare = std::less<Key>,  //           |/_
     typename Allocator = std::allocator<std::pair<const Key, T>>
     >
@@ -48,11 +52,11 @@ private:
 
     // Аллокатор для обычных узлов
     using node_allocator = typename std::allocator_traits<Allocator>::template rebind_alloc<Node>;
-    node_allocator node_alloc_{};
+    node_allocator node_alloc_;
 
     // Аллокатор для фиктивных узлов
     using base_allocator = typename std::allocator_traits<Allocator>::template rebind_alloc<BaseNode>;
-    base_allocator base_alloc_{};
+    base_allocator base_alloc_;
 
     //                   ~~Схема реализации~~
     //  ___________________
@@ -472,7 +476,9 @@ public:
         imaginary_(create_imaginary()),
         size_(0),
         comp_(Compare()),
-        alloc_(Allocator()) {}
+        alloc_(Allocator()),
+        node_alloc_(Allocator()),
+        base_alloc_(Allocator()) {}
 
     /**
      * @brief Конструктор из компаратора и аллокатора
@@ -491,6 +497,87 @@ public:
         alloc_(alloc),
         node_alloc_(alloc),
         base_alloc_(alloc) {}
+
+    /**
+     * @brief Map - конструктор от аллокатора
+     *
+     * @param alloc - аллокатор
+     */
+    explicit Map(const Allocator& alloc) :
+        imaginary_(create_imaginary()),
+        size_(0),
+        comp_(Compare()),
+        alloc_(alloc),
+        node_alloc_(alloc),
+        base_alloc_(alloc) {}
+
+    /**
+     * @brief Map - конструктор от диапазона
+     *
+     * @param first - итератор на начало диапазона
+     * @param last - итератор на конец диапазона
+     * @param comp - компаратор
+     * @param alloc - аллокатор
+     */
+    template<typename InputIt>
+    Map(InputIt first, InputIt last, const Compare& comp = Compare(), const Allocator& alloc = Allocator()) :
+        imaginary_(create_imaginary()),
+        size_(0),
+        comp_(comp),
+        alloc_(alloc),
+        node_alloc_(alloc),
+        base_alloc_(alloc)
+    { for(auto it = first; it != last; ++it) emplace(*it); }
+
+    /**
+     * @brief Map - конструктор от диапазона с подменой аллокатора
+     *
+     * @param first - итератор на начало диапазона
+     * @param last - итератор на конец диапазона
+     * @param alloc - аллокатор
+     */
+    template<typename InputIt>
+    Map(InputIt first, InputIt last, const Allocator& alloc) :
+        imaginary_(create_imaginary()),
+        size_(0),
+        comp_(Compare()),
+        alloc_(alloc),
+        node_alloc_(alloc),
+        base_alloc_(alloc)
+    { for(auto it = first; it != last; ++it) emplace(*it); }
+
+    /**
+     * @brief Map - конструктор от std::initializer_list<std::pair<const Key, T>>
+     *
+     * @param init - список инициализации
+     * @param comp - компаратор
+     * @param alloc - аллокатор
+     */
+    Map(std::initializer_list<value_type> init,
+        const Compare& comp = Compare(),
+        const Allocator& alloc = Allocator()) :
+        imaginary_(create_imaginary()),
+        size_(0),
+        comp_(comp),
+        alloc_(alloc),
+        node_alloc_(alloc),
+        base_alloc_(alloc)
+    { for(auto v : init) emplace(std::move(v)); }
+
+    /**
+     * @brief Map - конструктор от std::initializer_list<std::pair<const Key, T>> с подменой аллокатора
+     *
+     * @param init - список инициализации
+     * @param alloc - аллокатор
+     */
+    Map(std::initializer_list<value_type> init, const Allocator& alloc) :
+        imaginary_(create_imaginary()),
+        size_(0),
+        comp_(Compare()),
+        alloc_(alloc),
+        node_alloc_(alloc),
+        base_alloc_(alloc)
+    { for(auto v : init) emplace(std::move(v)); }
 
     /**
      * @brief Конструктор копирования
@@ -633,8 +720,38 @@ private:
         return { parent, is_left, nullptr };
     }
 
+public:
+
+    /**
+     * @brief find - поиск по ключу
+     *
+     * @param key - ключ
+     *
+     * @return iterator на std::pair<const Key, T>
+     */
+    iterator find(const Key& key) noexcept {
+        auto [_, __, ptr] = finder(key);
+        if(ptr != nullptr) return iterator(ptr);
+        else return end();
+    }
+
+    /**
+     * @brief find - поиск по ключу
+     *
+     * @param key - ключ
+     *
+     * @return const_iterator на const std::pair<const Key, T>
+     */
+    const_iterator find(const Key& key) const noexcept {
+        const auto [_, __, ptr] = finder(key);
+        if(ptr != nullptr) return const_iterator(ptr);
+        else return end();
+    }
+
 
     // RED-BLACK TREE BLOCK
+
+private:
 
     /**
      * @brief is_red - Узел красный?
@@ -648,8 +765,6 @@ private:
         return node != nullptr && node->is_red_;
     }
 
-private:
-
     /**
      * @brief verify_subtree - рекурсивный обход поддерева с проверкой инвариантов КЧ-дерева
      *
@@ -662,9 +777,8 @@ private:
     int verify_subtree(BaseNode* node) const {
         if (node == nullptr) return 1; // nullptr (лист) имеет черную высоту 1
 
-        if (is_red(node) && (is_red(node->left_) || is_red(node->right_))) {
+        if (is_red(node) && (is_red(node->left_) || is_red(node->right_)))
             throw std::logic_error("There are two red nodes in a row;");
-        }
 
         int left_black_height = verify_subtree(node->left_);
         int right_black_height = verify_subtree(node->right_);
@@ -753,6 +867,8 @@ private:
         y->right_ = x;
         x->parent_ = y;
     }
+
+    // EMPLACE BLOCK
 
     /**
      * @brief emplace_balancer - валидирует КЧ-дерево при добавлении нового элемента
@@ -1148,11 +1264,11 @@ private:
                 //
                 //               ...
                 //               /
-                //           [?]parent
+                //           [Black]parent
                 //           /       \
                 //      [Black]node  [Red]brother
                 //      /   \           /       \
-                //    a...  b...      [black]    e...
+                //    a...  b...      [Black]    e...
                 //                    important
                 //                      /   \
                 //                    c...  d...
@@ -1204,12 +1320,16 @@ private:
                     is_left = (node == parent->left_);
                     continue; // продолжить цикл с новым node/parent
                 }
-                //                  ...
-                //                  /
-                //            [Black]parent
-                //             /          \
-                //           [Red]node     d...
-                //           /        \
+                //  Если node красный, то после
+                //  выхода из цикла node станет черным
+                //  и конфликт c brother разрешится
+                //            |
+                //            |      ...
+                //            |      /
+                //            |  [?]parent
+                //           \|/  /       \
+                //           [?]node     d...
+                //           /       \
                 //   [Black]old_node  [Red]brother
                 //      /   \          /     \
                 //    a...  b...   [black]  [black]
@@ -1219,7 +1339,6 @@ private:
                 //
 
                 else
-
                 {
                     // Case 3: правый ребёнок брата чёрный
                     //                     ...
@@ -1277,8 +1396,6 @@ private:
 
                     // Перекраска и левый поворот вокруг parent
                     brother->is_red_ = is_red(parent);
-                    // parent - красный, тогда grandparent - черный и конфликта выше не возникнет
-                    // parent - черный - конфликта выше не возникнет
 
                     parent->is_red_  = false;
                     b_right->is_red_ = false;
@@ -1288,11 +1405,11 @@ private:
                     // После решающего поворота мы можем закончить —
                     // установить node = root и выйти
                     node = imaginary_->left_;
-                    break;
 
                     //              ...
                     //              /
-                    //           [?]brother
+                    //           [?]brother  <--- Конфликта выше(красный<->красный) не будет,
+                    //            /       \       так как раньше(до поворота) конфликта не было
                     //           /         \
                     //      [Black]parent  [Black]b_right
                     //         /       \        /    \
@@ -1343,8 +1460,7 @@ private:
             }
         }
 
-        // Гарантируем, что корень чёрный
-        if (imaginary_->left_) imaginary_->left_->is_red_ = false;
+        if (node != nullptr) node->is_red_ = false;  // Восстанавливает все свойства
     }
 
 public:
@@ -1385,32 +1501,6 @@ public:
     }
 
     // ACCESS BLOCK
-
-    /**
-     * @brief find - поиск по ключу
-     *
-     * @param key - ключ
-     *
-     * @return iterator на std::pair<const Key, T>
-     */
-    iterator find(const Key& key) noexcept {
-        auto [_, __, ptr] = finder(key);
-        if(ptr != nullptr) return iterator(ptr);
-        else return end();
-    }
-
-    /**
-     * @brief find - поиск по ключу
-     *
-     * @param key - ключ
-     *
-     * @return const_iterator на const std::pair<const Key, T>
-     */
-    const_iterator find(const Key& key) const noexcept {
-        const auto [_, __, ptr] = finder(key);
-        if(ptr != nullptr) return const_iterator(ptr);
-        else return end();
-    }
 
     /**
      * @brief at - доступ по ключу(бросает исключение)
