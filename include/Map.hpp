@@ -4,11 +4,11 @@
 #include <functional>
 #include <stdexcept>
 
-// CURRENT VERSION v0.1.1
+// CURRENT VERSION v0.1.2
 
 // CHANGELOG:
-// > Исправлена критическая ошибка алгоритма удаления
-// > Добавлены конструкторы от диапазона и std::initializer_list
+// > Добавлена безопастность исключений в конструкторы
+// > Добавлен метод swap()
 
 namespace mystl {
 
@@ -40,7 +40,10 @@ private:
         Node(Args&&... args) : value_(std::forward<Args>(args)...) {}
     };
 
-    // Хриним мнимую ноду
+    // Хриним указатель на мнимую ноду
+
+    // TODO: При необходимости рефакторинга для noexcept конструкторов
+    // рассмотреть хранение imaginary_ как члена класса (не указателя)
     BaseNode* imaginary_;
 
     // По стандарту нужен размер
@@ -238,7 +241,7 @@ private:
             auto copy = *this;
             --(*this);
             return copy;
-        };
+        }
 
         /**
          * @brief Геттер, возвращающий сырой указатель
@@ -367,8 +370,6 @@ private:
     BaseNode* create_imaginary() {
         BaseNode* node = std::allocator_traits<base_allocator>::allocate(base_alloc_, 1);
         std::allocator_traits<base_allocator>::construct(base_alloc_, node);
-        node->left_ = nullptr;
-        node->right_ = nullptr;
         node->parent_ = node;
         return node;
     }
@@ -378,10 +379,10 @@ private:
      *
      * @param node - указатель на мниную ноду
      */
-    void destroy_imaginary(BaseNode* node) noexcept {
-        if(node) {
-            std::allocator_traits<base_allocator>::destroy(base_alloc_, node);
-            std::allocator_traits<base_allocator>::deallocate(base_alloc_, node, 1);
+    void destroy_imaginary() noexcept {
+        if(imaginary_ != nullptr) {
+            std::allocator_traits<base_allocator>::destroy(base_alloc_, imaginary_);
+            std::allocator_traits<base_allocator>::deallocate(base_alloc_, imaginary_, 1);
         }
     }
 
@@ -464,7 +465,7 @@ public:
      */
     ~Map() {
         clear();
-        destroy_imaginary(imaginary_);
+        destroy_imaginary();
     }
 
     /**
@@ -472,13 +473,7 @@ public:
      *
      * @exception std::bad_alloc при невозможности выделения памяти
      */
-    Map() :
-        imaginary_(create_imaginary()),
-        size_(0),
-        comp_(Compare()),
-        alloc_(Allocator()),
-        node_alloc_(Allocator()),
-        base_alloc_(Allocator()) {}
+    Map() : Map(Compare(), Allocator()) {}
 
     /**
      * @brief Конструктор из компаратора и аллокатора
@@ -491,25 +486,26 @@ public:
      */
     explicit Map(const Compare& comp,
                  const Allocator& alloc = Allocator()) :
-        imaginary_(create_imaginary()),
+        imaginary_(nullptr),
         size_(0),
         comp_(comp),
         alloc_(alloc),
         node_alloc_(alloc),
-        base_alloc_(alloc) {}
+        base_alloc_(alloc)
+    {
+        try {
+            imaginary_ = create_imaginary();
+        } catch(...) {
+            destroy_imaginary();
+        }
+    }
 
     /**
      * @brief Map - конструктор от аллокатора
      *
      * @param alloc - аллокатор
      */
-    explicit Map(const Allocator& alloc) :
-        imaginary_(create_imaginary()),
-        size_(0),
-        comp_(Compare()),
-        alloc_(alloc),
-        node_alloc_(alloc),
-        base_alloc_(alloc) {}
+    explicit Map(const Allocator& alloc) : Map(Compare(), alloc) {}
 
     /**
      * @brief Map - конструктор от диапазона
@@ -520,14 +516,17 @@ public:
      * @param alloc - аллокатор
      */
     template<typename InputIt>
+    requires std::copy_constructible<std::pair<const Key, T>>
     Map(InputIt first, InputIt last, const Compare& comp = Compare(), const Allocator& alloc = Allocator()) :
-        imaginary_(create_imaginary()),
-        size_(0),
-        comp_(comp),
-        alloc_(alloc),
-        node_alloc_(alloc),
-        base_alloc_(alloc)
-    { for(auto it = first; it != last; ++it) emplace(*it); }
+        Map(comp, alloc)
+    {
+        try {
+            for(auto it = first; it != last; ++it) emplace(*it);
+        } catch(...) {
+            clear();
+            destroy_imaginary();
+        }
+    }
 
     /**
      * @brief Map - конструктор от диапазона с подменой аллокатора
@@ -537,14 +536,8 @@ public:
      * @param alloc - аллокатор
      */
     template<typename InputIt>
-    Map(InputIt first, InputIt last, const Allocator& alloc) :
-        imaginary_(create_imaginary()),
-        size_(0),
-        comp_(Compare()),
-        alloc_(alloc),
-        node_alloc_(alloc),
-        base_alloc_(alloc)
-    { for(auto it = first; it != last; ++it) emplace(*it); }
+    requires std::copy_constructible<std::pair<const Key, T>>
+    Map(InputIt first, InputIt last, const Allocator& alloc) : Map(first, last, Compare(), alloc) {}
 
     /**
      * @brief Map - конструктор от std::initializer_list<std::pair<const Key, T>>
@@ -555,14 +548,17 @@ public:
      */
     Map(std::initializer_list<value_type> init,
         const Compare& comp = Compare(),
-        const Allocator& alloc = Allocator()) :
-        imaginary_(create_imaginary()),
-        size_(0),
-        comp_(comp),
-        alloc_(alloc),
-        node_alloc_(alloc),
-        base_alloc_(alloc)
-    { for(auto v : init) emplace(std::move(v)); }
+        const Allocator& alloc = Allocator())
+        requires std::copy_constructible<std::pair<const Key, T>> : Map(comp, alloc)
+    {
+        try {
+            for(auto v : init) emplace(v);
+        } catch(...) {
+            clear();
+            destroy_imaginary();
+            throw;
+        }
+    }
 
     /**
      * @brief Map - конструктор от std::initializer_list<std::pair<const Key, T>> с подменой аллокатора
@@ -570,14 +566,7 @@ public:
      * @param init - список инициализации
      * @param alloc - аллокатор
      */
-    Map(std::initializer_list<value_type> init, const Allocator& alloc) :
-        imaginary_(create_imaginary()),
-        size_(0),
-        comp_(Compare()),
-        alloc_(alloc),
-        node_alloc_(alloc),
-        base_alloc_(alloc)
-    { for(auto v : init) emplace(std::move(v)); }
+    Map(std::initializer_list<value_type> init, const Allocator& alloc) : Map(init, Compare(), alloc) {}
 
     /**
      * @brief Конструктор копирования
@@ -590,20 +579,25 @@ public:
      */
     Map(const Map& other)
         requires std::copy_constructible<std::pair<const Key, T>> :
-        imaginary_(create_imaginary()),
+        imaginary_(nullptr),
         size_(other.size_),
         comp_(other.comp_),
         alloc_(std::allocator_traits<Allocator>::select_on_container_copy_construction(other.alloc_)),
-        node_alloc_(other.alloc_),
-        base_alloc_(other.alloc_)
+        node_alloc_(alloc_),
+        base_alloc_(alloc_)
     {
+        try {
+            imaginary_ = create_imaginary();
+        } catch(...) {
+            destroy_imaginary();
+            throw;
+        }
+
         try {
             imaginary_->left_ = cloner(other.imaginary_->left_, imaginary_);
         } catch(...) {
-            if (imaginary_) {
-                clear();
-                destroy_imaginary(imaginary_);
-            }
+            clear();
+            destroy_imaginary();
             throw;
         }
     }
@@ -624,12 +618,14 @@ public:
         node_alloc_(std::move(other.node_alloc_)),
         base_alloc_(std::move(other.base_alloc_))
     {
-        other.comp_ = Compare();
-        other.alloc_ = Allocator();
-        other.node_alloc_ = node_allocator();
-        other.base_alloc_ = base_allocator();
-        other.imaginary_ = create_imaginary();
-        other.size_ = 0;
+        try {
+            imaginary_ = create_imaginary();
+        } catch(...) {
+            destroy_imaginary();
+            throw;
+        }
+
+        swap(other);
     }
 
     /**
@@ -656,27 +652,8 @@ public:
      */
     Map& operator = (Map&& other) {
         if(this != &other) {
-            BaseNode* new_imaginary = other.imaginary_;
-            size_t new_size = other.size_;
-
-            std::swap(imaginary_, new_imaginary);
-            std::swap(size_, new_size);
-            comp_ = std::move(other.comp_);
-            alloc_ = std::move(other.alloc_);
-            node_alloc_ = std::move(other.node_alloc_);
-            base_alloc_ = std::move(other.base_alloc_);
-
-            if (new_imaginary) {
-                clear();
-                destroy_imaginary(new_imaginary);
-            }
-
-            other.comp_ = Compare();
-            other.alloc_ = Allocator();
-            other.node_alloc_ = node_allocator();
-            other.base_alloc_ = base_allocator();
-            other.imaginary_ = create_imaginary();
-            other.size_ = 0;
+            Map temp(std::move(other));
+            swap(temp);
         }
         return *this;
     }
@@ -1581,6 +1558,27 @@ public:
      * @brief clear - очистка контейнера
      */
     void clear() noexcept { cleaner(imaginary_->left_); size_ = 0; }
+
+    /**
+     * @brief swap - обмен содержимым двух Map
+     *
+     * @param other - другая Map
+     */
+    void swap(Map& other) noexcept {
+        // Обмениваем указатели на imaginary_
+        std::swap(imaginary_, other.imaginary_);
+
+        // Обмениваем размер
+        std::swap(size_, other.size_);
+
+        // Обмениваем компаратор
+        std::swap(comp_, other.comp_);
+
+        // Обмениваем аллокаторы
+        std::swap(alloc_, other.alloc_);
+        std::swap(node_alloc_, other.node_alloc_);
+        std::swap(base_alloc_, other.base_alloc_);
+    }
 };
 
 }
