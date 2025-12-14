@@ -4,11 +4,11 @@
 #include <functional>
 #include <stdexcept>
 
-// CURRENT VERSION v0.1.2
+// CURRENT VERSION v0.1.3
 
 // CHANGELOG:
-// > Добавлена безопастность исключений в конструкторы
-// > Добавлен метод swap()
+// > imaginary_ теперь хранится на стеке, а не на heap
+// > allocator-aware поддержан
 
 namespace mystl {
 
@@ -40,26 +40,19 @@ private:
         Node(Args&&... args) : value_(std::forward<Args>(args)...) {}
     };
 
-    // Хриним указатель на мнимую ноду
-
-    // TODO: При необходимости рефакторинга для noexcept конструкторов
-    // рассмотреть хранение imaginary_ как члена класса (не указателя)
-    BaseNode* imaginary_;
+    // Хриним мнимую ноду
+    BaseNode imaginary_;
 
     // По стандарту нужен размер
     std::size_t size_;
 
     // Аллокатор и компаратор
-    Compare comp_;
-    Allocator alloc_;
+    [[no_unique_address]]Compare comp_;
+    [[no_unique_address]]Allocator alloc_;
 
     // Аллокатор для обычных узлов
     using node_allocator = typename std::allocator_traits<Allocator>::template rebind_alloc<Node>;
-    node_allocator node_alloc_;
-
-    // Аллокатор для фиктивных узлов
-    using base_allocator = typename std::allocator_traits<Allocator>::template rebind_alloc<BaseNode>;
-    base_allocator base_alloc_;
+    [[no_unique_address]]node_allocator node_alloc_;
 
     //                   ~~Схема реализации~~
     //  ___________________
@@ -266,7 +259,7 @@ public:
      */
     iterator begin() noexcept {
         if (size_ == 0) return end();
-        BaseNode* leftmost = imaginary_->left_;
+        BaseNode* leftmost = imaginary_.left_;
         while (leftmost->left_ != nullptr) {
             leftmost = leftmost->left_;
         }
@@ -279,7 +272,7 @@ public:
      */
     const_iterator begin() const noexcept {
         if (size_ == 0) return end();
-        const BaseNode* leftmost = imaginary_->left_;
+        const BaseNode* leftmost = imaginary_.left_;
         while (leftmost->left_ != nullptr) {
             leftmost = leftmost->left_;
         }
@@ -298,13 +291,13 @@ public:
      *
      * @return iterator - итератор на мнимую ноду
      */
-    iterator end() noexcept { return iterator(imaginary_); }
+    iterator end() noexcept { return iterator(&imaginary_); }
     /**
      * @brief end - итератор на конец таблицы
      *
      * @return const_iterator - константный итератор на мнимую ноду
      */
-    const_iterator end() const noexcept { return const_iterator(imaginary_); }
+    const_iterator end() const noexcept { return const_iterator(&imaginary_); }
     /**
      * @brief cend - строго константный итератор на мнимый узел
      *
@@ -360,31 +353,6 @@ public:
 
 private:
 
-    /**
-     * @brief create_imaginary - создать мнимую ноду
-     *
-     * @exception std::bad_alloc в случае ошибки выделения памяти
-     *
-     * @return BaseNode* - указатель на созданную ноду
-     */
-    BaseNode* create_imaginary() {
-        BaseNode* node = std::allocator_traits<base_allocator>::allocate(base_alloc_, 1);
-        std::allocator_traits<base_allocator>::construct(base_alloc_, node);
-        node->parent_ = node;
-        return node;
-    }
-
-    /**
-     * @brief destroy_imaginary - освободить память из под мнимой ноды
-     *
-     * @param node - указатель на мниную ноду
-     */
-    void destroy_imaginary() noexcept {
-        if(imaginary_ != nullptr) {
-            std::allocator_traits<base_allocator>::destroy(base_alloc_, imaginary_);
-            std::allocator_traits<base_allocator>::deallocate(base_alloc_, imaginary_, 1);
-        }
-    }
 
     /**
      * @brief create_node - создать ноду из переданных аргументов
@@ -415,7 +383,7 @@ private:
      * @param node - указатель на узел
      */
     void cleaner(BaseNode* node) noexcept {
-        if (node == nullptr || node == imaginary_) return;
+        if (node == nullptr) return;
 
         cleaner(node->left_);
         cleaner(node->right_);
@@ -463,11 +431,7 @@ public:
      *
      * @exception std::bad_alloc при невозможности выделения памяти
      */
-    ~Map() {
-        clear();
-        destroy_imaginary();
-    }
-
+    ~Map() { clear(); }
     /**
      * @brief Дефолт конструктор
      *
@@ -486,19 +450,12 @@ public:
      */
     explicit Map(const Compare& comp,
                  const Allocator& alloc = Allocator()) :
-        imaginary_(nullptr),
+        imaginary_(),
         size_(0),
         comp_(comp),
         alloc_(alloc),
-        node_alloc_(alloc),
-        base_alloc_(alloc)
-    {
-        try {
-            imaginary_ = create_imaginary();
-        } catch(...) {
-            destroy_imaginary();
-        }
-    }
+        node_alloc_(alloc)
+    { imaginary_.parent_ = &imaginary_; }
 
     /**
      * @brief Map - конструктор от аллокатора
@@ -524,7 +481,6 @@ public:
             for(auto it = first; it != last; ++it) emplace(*it);
         } catch(...) {
             clear();
-            destroy_imaginary();
         }
     }
 
@@ -555,7 +511,6 @@ public:
             for(auto v : init) emplace(v);
         } catch(...) {
             clear();
-            destroy_imaginary();
             throw;
         }
     }
@@ -579,25 +534,19 @@ public:
      */
     Map(const Map& other)
         requires std::copy_constructible<std::pair<const Key, T>> :
-        imaginary_(nullptr),
-        size_(other.size_),
+        imaginary_(),
+        size_(0),
         comp_(other.comp_),
         alloc_(std::allocator_traits<Allocator>::select_on_container_copy_construction(other.alloc_)),
-        node_alloc_(alloc_),
-        base_alloc_(alloc_)
+        node_alloc_(alloc_)
     {
-        try {
-            imaginary_ = create_imaginary();
-        } catch(...) {
-            destroy_imaginary();
-            throw;
-        }
+        imaginary_.parent_ = &imaginary_;
 
         try {
-            imaginary_->left_ = cloner(other.imaginary_->left_, imaginary_);
+            if (other.size_ > 0) imaginary_.left_ = cloner(other.imaginary_.left_, &imaginary_);
+            size_ = other.size_;
         } catch(...) {
             clear();
-            destroy_imaginary();
             throw;
         }
     }
@@ -610,23 +559,59 @@ public:
      * @exception std::bad_alloc при неудачном выделении памяти
      * @exception Любые исключения, связанные с копированием аллокатора или компаратора
      */
-    Map(Map&& other)
-        : imaginary_(other.imaginary_),
-        size_(other.size_),
-        comp_(std::move(other.comp_)),
-        alloc_(std::move(other.alloc_)),
-        node_alloc_(std::move(other.node_alloc_)),
-        base_alloc_(std::move(other.base_alloc_))
+    Map(Map&& other) :
+        imaginary_(),
+        size_(0),
+        comp_(std::move(other.comp_))
     {
+        imaginary_.parent_ = &imaginary_;
+
+        if constexpr (std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value) {
+            // Аллокатор перемещается вместе с контейнером
+            alloc_ = std::move(other.alloc_);
+            node_alloc_ = std::move(other.node_alloc_);
+
+            if (other.size_ > 0) {
+                imaginary_.left_ = other.imaginary_.left_;
+                size_ = other.size_;
+
+                if (imaginary_.left_ != nullptr) imaginary_.left_->parent_ = &imaginary_;
+
+                other.imaginary_.left_ = nullptr;
+                other.size_ = 0;
+                return;
+            }
+        } else {
+            // Аллокатор не перемещается
+            alloc_ = other.alloc_;
+            node_alloc_ = other.node_alloc_;
+
+            if (alloc_ == other.alloc_) {
+                // Аллокаторы равны - можем переместить дерево
+                if (other.size_ > 0) {
+                    imaginary_.left_ = other.imaginary_.left_;
+                    size_ = other.size_;
+
+                    if (imaginary_.left_ != nullptr) imaginary_.left_->parent_ = &imaginary_;
+
+                    other.imaginary_.left_ = nullptr;
+                    other.size_ = 0;
+                    return;
+                }
+            }
+        }
+
+        // Глубокое перемещение
         try {
-            imaginary_ = create_imaginary();
+            for(const auto& v : other) emplace(std::move(v));
         } catch(...) {
-            destroy_imaginary();
+            clear();
             throw;
         }
 
-        swap(other);
+        other.clear();
     }
+
 
     /**
      * @brief operator = - копирующий опревтор присваивания
@@ -651,10 +636,48 @@ public:
      * @return Map& - ссылка на себя
      */
     Map& operator = (Map&& other) {
-        if(this != &other) {
-            Map temp(std::move(other));
-            swap(temp);
+        if (this == &other) {
+            return *this;
         }
+
+        // Освобождаем текущие ресурсы
+        clear();
+
+        if constexpr (std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value) {
+            // Аллокаторы перемещаются
+            alloc_ = std::move(other.alloc_);
+            node_alloc_ = std::move(other.node_alloc_);
+            comp_ = std::move(other.comp_);
+
+            if (other.size_ > 0) {
+                imaginary_.left_ = other.imaginary_.left_;
+                size_ = other.size_;
+
+                if (imaginary_.left_ != nullptr) {
+                    imaginary_.left_->parent_ = &imaginary_;
+                }
+
+                other.imaginary_.left_ = nullptr;
+                other.size_ = 0;
+            }
+
+        } else {
+            // Аллокаторы не перемещаются
+            if (alloc_ == other.alloc_) {
+                swap(other);
+            } else {
+                try {
+                    for(const auto& v : other) emplace(std::move(v));
+                } catch(...) {
+                    clear();
+                    throw;
+                }
+
+                other.clear();
+                comp_ = std::move(other.comp_);
+            }
+        }
+
         return *this;
     }
 
@@ -668,16 +691,16 @@ private:
         Node* existing;     // найденный ключ или nullptr
     };
 
-    /**
-     * @brief finder - поиск элемента в дереве
-     *
-     * @param key - ключ
-     *
-     * @return FindResult
-     */
     FindResult finder(const Key& key) const noexcept {
-        BaseNode* cur = imaginary_->left_;
-        BaseNode* parent = imaginary_;
+        BaseNode* cur = imaginary_.left_;
+        BaseNode* parent = const_cast<BaseNode*>(&imaginary_);
+        //                      /|\
+        //                       |
+        //                   Const_cast!!!
+        //
+        // Этот const_cast - цена рефакторинга. В данном контексте безопасен.
+        // Предоставляет возможность не делать константную пеегрузку
+
         bool is_left = true;
 
         while (cur != nullptr) {
@@ -696,6 +719,8 @@ private:
         }
         return { parent, is_left, nullptr };
     }
+
+
 
 public:
 
@@ -752,7 +777,7 @@ private:
      * @throws std::logic_error в случае, если КЧ-дерево невалидно
      */
     int verify_subtree(BaseNode* node) const {
-        if (node == nullptr) return 1; // nullptr (лист) имеет черную высоту 1
+        if (node == nullptr) return 1; // nullptr имеет черную высоту 1
 
         if (is_red(node) && (is_red(node->left_) || is_red(node->right_)))
             throw std::logic_error("There are two red nodes in a row;");
@@ -773,11 +798,11 @@ public:
      * @exception std::logic_error в случае, если КЧ-дерево невалидно
      */
     void invariants_checker() const {
-        if(is_red(imaginary_)) throw std::logic_error("Imaginary node must be black, but it is red now;");
-        if(is_red(imaginary_->left_)) throw std::logic_error("Root is not black;");
+        if(imaginary_.is_red_) throw std::logic_error("Imaginary node must be black, but it is red now;");
+        if(is_red(imaginary_.left_)) throw std::logic_error("Root is not black;");
 
         try {
-            verify_subtree(imaginary_->left_);
+            verify_subtree(imaginary_.left_);
         } catch (const std::logic_error& e) {
             throw std::logic_error(std::string("RB-tree invariant violation: ") + e.what());
         }
@@ -791,28 +816,56 @@ private:
      * @param x
      */
     void rotate_left(BaseNode* x) noexcept {
+        //             origin...
+        //               /
+        //              x
+        //            /  \
+        //         a...   y
+        //               / \
+        //             b... c...
         BaseNode* y = x->right_;  // 1. Фиксируем правого ребенка
 
         // 2. Перемещаем поддерево B
         x->right_ = y->left_;
-        if (y->left_) {
-            y->left_->parent_ = x;
-        }
+        if (y->left_) y->left_->parent_ = x;
+
+        //             origin...
+        //               /
+        //              x
+        //            /  \
+        //         a...   b...
+        //
 
         // 3. Устанавливаем родителя Y
         y->parent_ = x->parent_;
-        if (x->parent_ == imaginary_) {
+        if (x->parent_ == &imaginary_) {
             // X был корнем
-            imaginary_->left_ = y;
+            imaginary_.left_ = y;
         } else if (x == x->parent_->left_) {
             x->parent_->left_ = y;
         } else {
             x->parent_->right_ = y;
         }
 
+        //     origin...  origin...
+        //       /          /|\
+        //      /            |
+        //     x             y
+        //   /  \            \
+        // a...  b...        c...
+        //
+
         // 4. Делаем X левым ребенком Y
         y->left_ = x;
         x->parent_ = y;
+
+        //            origin...
+        //               /
+        //              y
+        //            /  \
+        //          x   c...
+        //        /  \
+        //     a...  b...
     }
 
     /**
@@ -821,26 +874,20 @@ private:
      * @param x
      */
     void rotate_right(BaseNode* x) noexcept {
-        BaseNode* y = x->left_;  // 1. Фиксируем левого ребенка
+        BaseNode* y = x->left_;
 
-        // 2. Перемещаем поддерево B
         x->left_ = y->right_;
-        if (y->right_) {
-            y->right_->parent_ = x;
-        }
+        if (y->right_) y->right_->parent_ = x;
 
-        // 3. Устанавливаем родителя Y
         y->parent_ = x->parent_;
-        if (x->parent_ == imaginary_) {
-            // X был корнем
-            imaginary_->left_ = y;
+        if (x->parent_ == &imaginary_) {
+            imaginary_.left_ = y;
         } else if (x == x->parent_->left_) {
             x->parent_->left_ = y;
         } else {
             x->parent_->right_ = y;
         }
 
-        // 4. Делаем X правым ребенком Y
         y->right_ = x;
         x->parent_ = y;
     }
@@ -853,7 +900,7 @@ private:
      * @param node - указатель на вставленный узел
      */
     void emplace_balancer(BaseNode* node) noexcept {
-        while (node->parent_ != imaginary_ && is_red(node->parent_)) {
+        while (node->parent_ != &imaginary_ && is_red(node->parent_)) {
             BaseNode* parent = node->parent_;
             BaseNode* grandparent = parent->parent_;
             //            /|\
@@ -997,7 +1044,7 @@ private:
         }
 
         // Красим корень в черный, соблюдая инвариант
-        if (imaginary_->left_) imaginary_->left_->is_red_ = false;
+        if (imaginary_.left_) imaginary_.left_->is_red_ = false;
     }
 
 public:
@@ -1015,7 +1062,7 @@ public:
     requires std::constructible_from<std::pair<const Key, T>, Args...>
     std::pair<iterator, bool> emplace(Args&&... args) {
 
-        auto new_node = create_node(std::forward<Args>(args)...);  // Прямая передача
+        auto new_node = create_node(std::forward<Args>(args)...);
 
         auto res = finder(new_node->value_.first);
 
@@ -1225,7 +1272,7 @@ private:
         bool is_left = x_is_left;
 
         // Цикл: пока x не корень и x чёрный
-        while ((parent != imaginary_) && !is_red(node)) {
+        while ((parent != &imaginary_) && !is_red(node)) {
 
             // Если node — левый ребёнок parent
             //              ...
@@ -1381,7 +1428,7 @@ private:
 
                     // После решающего поворота мы можем закончить —
                     // установить node = root и выйти
-                    node = imaginary_->left_;
+                    node = imaginary_.left_;
 
                     //              ...
                     //              /
@@ -1432,7 +1479,7 @@ private:
                 if (b_left != nullptr) b_left->is_red_ = false;
 
                 rotate_right(parent);
-                node = imaginary_->left_;
+                node = imaginary_.left_;
                 break;
             }
         }
@@ -1489,8 +1536,8 @@ public:
      * @return T&
      */
     T& at(const Key& key) {
-        auto res = finder(key);
-        if (res.existing != nullptr) return res.existing->value_.second;
+        auto it = find(key);
+        if (it != end()) return it->second;
         else throw std::out_of_range("Map doesent contains such element");
     }
 
@@ -1504,8 +1551,8 @@ public:
      * @return T&
      */
     const T& at(const Key& key) const {
-        auto res = finder(key);
-        if (res.existing != nullptr) return res.existing->value_.second;
+        auto it = find(key);
+        if (it != end()) return it->second;
         else throw std::out_of_range("Map doesent contains such element");
     }
 
@@ -1517,8 +1564,8 @@ public:
      * @return T&
      */
     T& operator[](const Key& key) noexcept {
-        auto res = finder(key);
-        if (res.existing != nullptr) return res.existing->value_.second;
+        auto it = find(key);
+        if (it != end()) return it->second;
         else {
             auto [it, _] = emplace(key, T());
             return it->second;
@@ -1557,27 +1604,31 @@ public:
     /**
      * @brief clear - очистка контейнера
      */
-    void clear() noexcept { cleaner(imaginary_->left_); size_ = 0; }
+    void clear() noexcept { cleaner(imaginary_.left_); size_ = 0; }
 
     /**
      * @brief swap - обмен содержимым двух Map
      *
      * @param other - другая Map
      */
-    void swap(Map& other) noexcept {
-        // Обмениваем указатели на imaginary_
-        std::swap(imaginary_, other.imaginary_);
+    void swap(Map& other) noexcept(
+        std::allocator_traits<Allocator>::propagate_on_container_swap::value ||
+        std::allocator_traits<Allocator>::is_always_equal::value)
+    {
+        // Обмениваем корни деревьев
+        std::swap(imaginary_.left_, other.imaginary_.left_);
 
-        // Обмениваем размер
+        // Обновляем parent для корней
+        if (imaginary_.left_ != nullptr) imaginary_.left_->parent_ = &imaginary_;
+        if (other.imaginary_.left_ != nullptr) other.imaginary_.left_->parent_ = &other.imaginary_;
+
         std::swap(size_, other.size_);
-
-        // Обмениваем компаратор
         std::swap(comp_, other.comp_);
 
-        // Обмениваем аллокаторы
-        std::swap(alloc_, other.alloc_);
-        std::swap(node_alloc_, other.node_alloc_);
-        std::swap(base_alloc_, other.base_alloc_);
+        if constexpr (std::allocator_traits<Allocator>::propagate_on_container_swap::value) {
+            std::swap(alloc_, other.alloc_);
+            std::swap(node_alloc_, other.node_alloc_);
+        }
     }
 };
 
