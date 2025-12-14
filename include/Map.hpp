@@ -4,10 +4,10 @@
 #include <functional>
 #include <stdexcept>
 
-// CURRENT VERSION v0.1.4
+// CURRENT VERSION v0.1.5
 
 // CHANGELOG:
-// > Documentation fixes
+// >iterator bugfix
 
 namespace mystl {
 
@@ -105,7 +105,7 @@ private:
          * @param other - неконстантный итератор
          */
         common_iterator(const common_iterator<false>& other) noexcept
-            requires IsConst : node_ptr_(other.node_ptr_) {}
+            requires IsConst : node_ptr_(other.base()) {}
 
         /**
          * @brief Дефолт конструктор
@@ -158,7 +158,7 @@ private:
          */
         template <bool OtherConst>
         bool operator == (const common_iterator<OtherConst>& other) const noexcept
-        { return node_ptr_ == other.node_ptr_; }
+        { return node_ptr_ == other.base(); }
 
         /**
          * @brief operator !=
@@ -169,7 +169,7 @@ private:
          */
         template <bool OtherConst>
         bool operator != (const common_iterator<OtherConst>& other) const noexcept
-        { return node_ptr_ != other.node_ptr_; }
+        { return node_ptr_ != other.base(); }
 
         /**
          * @brief operator ++ - префиксный инкремент (inorder обход)
