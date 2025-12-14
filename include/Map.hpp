@@ -4,11 +4,10 @@
 #include <functional>
 #include <stdexcept>
 
-// CURRENT VERSION v0.1.3
+// CURRENT VERSION v0.1.4
 
 // CHANGELOG:
-// > imaginary_ теперь хранится на стеке, а не на heap
-// > allocator-aware поддержан
+// > Documentation fixes
 
 namespace mystl {
 
@@ -40,7 +39,7 @@ private:
         Node(Args&&... args) : value_(std::forward<Args>(args)...) {}
     };
 
-    // Хриним мнимую ноду
+    // Хриним мнимую ноду на стеке
     BaseNode imaginary_;
 
     // По стандарту нужен размер
@@ -428,28 +427,21 @@ public:
 
     /**
      * @brief Деструктор
-     *
-     * @exception std::bad_alloc при невозможности выделения памяти
      */
     ~Map() { clear(); }
     /**
      * @brief Дефолт конструктор
-     *
-     * @exception std::bad_alloc при невозможности выделения памяти
      */
-    Map() : Map(Compare(), Allocator()) {}
+    Map() noexcept : Map(Compare(), Allocator()) {}
 
     /**
      * @brief Конструктор из компаратора и аллокатора
      *
      * @param comp - компаратор
      * @param alloc - аллокатор
-     *
-     * @exception Любые исключения от конструктора копирования аллокатора или компаратора
-     * @exception std::bad_alloc при невозможности выделения памяти
      */
     explicit Map(const Compare& comp,
-                 const Allocator& alloc = Allocator()) :
+                 const Allocator& alloc = Allocator()) noexcept:
         imaginary_(),
         size_(0),
         comp_(comp),
@@ -462,7 +454,7 @@ public:
      *
      * @param alloc - аллокатор
      */
-    explicit Map(const Allocator& alloc) : Map(Compare(), alloc) {}
+    explicit Map(const Allocator& alloc) noexcept: Map(Compare(), alloc) {}
 
     /**
      * @brief Map - конструктор от диапазона
@@ -471,6 +463,8 @@ public:
      * @param last - итератор на конец диапазона
      * @param comp - компаратор
      * @param alloc - аллокатор
+     *
+     * @exception Любые исключения от конструктора копирования Key, T
      */
     template<typename InputIt>
     requires std::copy_constructible<std::pair<const Key, T>>
@@ -490,6 +484,8 @@ public:
      * @param first - итератор на начало диапазона
      * @param last - итератор на конец диапазона
      * @param alloc - аллокатор
+     *
+     * @exception Любые исключения от конструктора копирования Key, T
      */
     template<typename InputIt>
     requires std::copy_constructible<std::pair<const Key, T>>
@@ -501,6 +497,8 @@ public:
      * @param init - список инициализации
      * @param comp - компаратор
      * @param alloc - аллокатор
+     *
+     * @exception Любые исключения от конструктора копирования Key, T
      */
     Map(std::initializer_list<value_type> init,
         const Compare& comp = Compare(),
@@ -520,6 +518,8 @@ public:
      *
      * @param init - список инициализации
      * @param alloc - аллокатор
+     *
+     * @exception Любые исключения от конструктора копирования Key, T
      */
     Map(std::initializer_list<value_type> init, const Allocator& alloc) : Map(init, Compare(), alloc) {}
 
@@ -528,8 +528,6 @@ public:
      *
      * @param other - другой mystl::Map
      *
-     * @exception Любые исключения от конструктора копирования аллокатора или компаратора
-     * @exception std::bad_alloc при невозможности выделения памяти
      * @exception Любые исключения от конструктора копирования Key, T
      */
     Map(const Map& other)
@@ -556,8 +554,7 @@ public:
      *
      * @param other - другой mystl::map
      *
-     * @exception std::bad_alloc при неудачном выделении памяти
-     * @exception Любые исключения, связанные с копированием аллокатора или компаратора
+     * @exception Любые исключенеия от конструктора перемещения Key, T
      */
     Map(Map&& other) :
         imaginary_(),
@@ -619,6 +616,8 @@ public:
      * @param other - другой mystl::Map
      *
      * @return Map& - ссылка на себя
+     *
+     * @exception Любые исключенеия от конструктора перемещения Key, T
      */
     Map& operator = (const Map& other) {
         if (this != &other) {
@@ -634,6 +633,8 @@ public:
      * @param other - другой mystl::Map
      *
      * @return Map& - ссылка на себя
+     *
+     * @exception Любые исключенеия от конструктора перемещения Key, T
      */
     Map& operator = (Map&& other) {
         if (this == &other) {
@@ -687,16 +688,24 @@ private:
 
     struct FindResult {
         BaseNode* parent;   // куда вставлять
-        bool is_left;       // слева или справа
+        bool is_left;       // куда вставлять, слева или справа?
         Node* existing;     // найденный ключ или nullptr
     };
 
+
+    /**
+     * @brief finder - мастер поиска элемента в дереве по ключу
+     *
+     * @param key - ключ
+     *
+     * @return FindResult
+     */
     FindResult finder(const Key& key) const noexcept {
         BaseNode* cur = imaginary_.left_;
         BaseNode* parent = const_cast<BaseNode*>(&imaginary_);
         //                      /|\
         //                       |
-        //                   Const_cast!!!
+        //                   const_cast!!!
         //
         // Этот const_cast - цена рефакторинга. В данном контексте безопасен.
         // Предоставляет возможность не делать константную пеегрузку
@@ -1104,7 +1113,7 @@ private:
     /**
      * @brief eraser - механизм удаления узла по указаьтелю
      *
-     * Удаляет узел из бинарного дерева поиска по классическому алгоритму и
+     * @note Удаляет узел из бинарного дерева поиска по классическому алгоритму и
      * при необходимости вызывает балансировщик для поддержания инвариантов КЧ-дерева
      *
      * @param node - указатель на удалемый узел
@@ -1611,10 +1620,7 @@ public:
      *
      * @param other - другая Map
      */
-    void swap(Map& other) noexcept(
-        std::allocator_traits<Allocator>::propagate_on_container_swap::value ||
-        std::allocator_traits<Allocator>::is_always_equal::value)
-    {
+    void swap(Map& other) {
         // Обмениваем корни деревьев
         std::swap(imaginary_.left_, other.imaginary_.left_);
 
