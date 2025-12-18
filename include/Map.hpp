@@ -12,8 +12,8 @@
 namespace mystl {
 
 template<
-    typename Key,//         -----------  ПОДМЕНА АЛЛОКАТОРА И КОМПАРАТОРА НЕ ТЕСТИРОВАЛАСЬ
-    typename T,  //        \|/                         /
+    typename Key,//                      ПОДМЕНА АЛЛОКАТОРА НЕ ТЕСТИРОВАЛАСЬ
+    typename T,  //                                    /
     typename Compare = std::less<Key>,  //           |/_
     typename Allocator = std::allocator<std::pair<const Key, T>>
     >
@@ -708,7 +708,7 @@ private:
         //                   const_cast!!!
         //
         // Этот const_cast - цена рефакторинга. В данном контексте безопасен.
-        // Предоставляет возможность не делать константную пеегрузку
+        // Предоставляет возможность не делать две перегрузки finder
 
         bool is_left = true;
 
@@ -1098,13 +1098,24 @@ public:
     /**
      * @brief insert - вставка пары элементов
      *
-     * @param kv - пара const Key, T
+     * @param pair - const std::pair<const Key, T>&
      *
      * @return std::pair<iterator, bool> - итератор на собранный элемент и bool (вставлен ли элемент)
      *
      * @exception Любые исключения от конструктора копирования Key, T
      */
-    std::pair<iterator, bool> insert(const std::pair<const Key, T>& kv) { return emplace(kv); }
+    std::pair<iterator, bool> insert(const value_type& pair) { return emplace(pair); }
+
+    /**
+     * @brief insert - вставка пары элементов
+     *
+     * @param pair - std::pair<const Key, T>&&
+     *
+     * @return std::pair<iterator, bool> - итератор на собранный элемент и bool (вставлен ли элемент)
+     *
+     * @exception Любые исключения от конструктора перемещения Key, T
+     */
+    std::pair<iterator, bool> insert(value_type&& pair) { return emplace(std::move(pair)); }
 
     // ERASE BLOCK
 
@@ -1636,6 +1647,13 @@ public:
             std::swap(node_alloc_, other.node_alloc_);
         }
     }
+
+    /**
+     * @brief get_allocator - получение аллокатора
+     *
+     * @return копия аллокатора
+     */
+    Allocator get_allocator() const { return alloc_; }
 };
 
 }

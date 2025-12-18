@@ -6,8 +6,10 @@
 #include <initializer_list>
 #include <concepts>
 
-// CURRENT VERSION v0.1.0
+// CURRENT VERSION v0.1.2
 
+// CHANGELOG:
+// >iterator bugfix
 
                                          /* ПОДМЕНА АЛЛОКАТОРА НЕ ТЕСТИРОВАЛАСЬ */
 namespace mystl {         //                            /
@@ -64,18 +66,18 @@ private:
         common_iterator() = default;
         ~common_iterator() = default;
 
-        ConditionalRef operator * () const { return *ptr; }                                          // Input
-        ConditionalPtr operator -> () const { return ptr; }                                          // iterator
-        template <bool OtherConst>                                                                   // properties
-        bool operator == (const common_iterator<OtherConst>& other) const {return ptr == other.ptr;} //
-        template <bool OtherConst>                                                                   //
-        bool operator != (const common_iterator<OtherConst>& other) const {return ptr != other.ptr;} //
-        common_iterator<IsConst>& operator ++ () { ++ptr; return *this; }                            //
-        common_iterator<IsConst> operator ++ (int) {                                                 //
-            common_iterator<IsConst> copy = *this;                                                   //
-            ++(*this);                                                                               //
-            return copy;                                                                             //
-        }                                                                                            //
+        ConditionalRef operator * () const { return *ptr; }                                             // Input
+        ConditionalPtr operator -> () const { return ptr; }                                             // iterator
+        template <bool OtherConst>                                                                      // properties
+        bool operator == (const common_iterator<OtherConst>& other) const {return ptr == other.base();} //
+        template <bool OtherConst>                                                                      //
+        bool operator != (const common_iterator<OtherConst>& other) const {return ptr != other.base();} //
+        common_iterator<IsConst>& operator ++ () { ++ptr; return *this; }                               //
+        common_iterator<IsConst> operator ++ (int) {                                                    //
+            common_iterator<IsConst> copy = *this;                                                      //
+            ++(*this);                                                                                  //
+            return copy;                                                                                //
+        }                                                                                               //
 
         common_iterator(const common_iterator& other) = default;                                     // Forward
         common_iterator& operator=(const common_iterator& other) = default;                          // iterator
