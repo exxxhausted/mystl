@@ -6,10 +6,10 @@
 #include <initializer_list>
 #include <concepts>
 
-// CURRENT VERSION v0.1.2
+// CURRENT VERSION v0.1.3
 
 // CHANGELOG:
-// >iterator bugfix
+// >allocator-aware update
 
                                          /* ПОДМЕНА АЛЛОКАТОРА НЕ ТЕСТИРОВАЛАСЬ */
 namespace mystl {         //                            /
@@ -163,7 +163,7 @@ public:
         size_t i = 0;
         try {
             for(i = 0; i < sz; ++i) AllocatorTraits::construct(alloc, arr + i, value);
-        } catch (const std::exception&) {
+        } catch (...) {
             for (size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, arr + j);
             AllocatorTraits::deallocate(alloc, arr, cap);
             throw;
@@ -189,7 +189,7 @@ public:
         size_t i = 0;
         try {
             for(i = 0; i < sz; ++i) AllocatorTraits::construct(alloc, arr + i);
-        } catch (const std::exception&) {
+        } catch (...) {
             for (size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, arr + j);
             AllocatorTraits::deallocate(alloc, arr, cap);
             throw;
@@ -216,7 +216,7 @@ public:
                 AllocatorTraits::construct(alloc, arr + i, value);
                 i++;
             }
-        } catch (const std::exception&) {
+        } catch (...) {
             for (size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, arr + j);
             AllocatorTraits::deallocate(alloc, arr, cap);
             throw;
@@ -244,16 +244,15 @@ public:
      */
     DynamicArray(const DynamicArray& d_arr)
     requires std::copy_constructible<T>
-        : arr(nullptr), sz(0), cap(0), alloc(std::allocator_traits<Allocator>::select_on_container_copy_construction(d_arr.alloc))
+        : arr(nullptr), sz(0), cap(0), alloc(AllocatorTraits::select_on_container_copy_construction(d_arr.alloc))
     {
         reserve(d_arr.cap);
         sz = d_arr.sz;
 
         size_t i;
-        try{
+        try {
             for(i = 0; i < sz; ++i) AllocatorTraits::construct(alloc, arr + i, d_arr.arr[i]);
-        }
-        catch(const std::exception&) {
+        } catch (...) {
             for(size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, arr + j);
             AllocatorTraits::deallocate(alloc, arr, cap);
             throw;
@@ -269,12 +268,35 @@ public:
      * @exception std::bad_alloc При невозможности выделить память
      * @exception Любые исключения от конструктора копирования T
      */
-    DynamicArray& operator = (const DynamicArray& d_arr)
+    DynamicArray& operator = (const DynamicArray& other)
     requires std::copyable<T>
     {
-        if (this != &d_arr) {
-            DynamicArray temp(d_arr);
-            *this = std::move(temp);
+        if (this != &other) {
+            if constexpr (AllocatorTraits::propagate_on_container_copy_assignment::value) {
+                clear();
+                AllocatorTraits::deallocate(alloc, arr, cap);
+                arr = nullptr;
+                cap = 0;
+
+                alloc = other.alloc;
+
+                reserve(other.cap);
+                sz = other.sz;
+
+                size_t i = 0;
+                try {
+                    for(; i < sz; ++i) AllocatorTraits::construct(alloc, arr + i, other.arr[i]);
+                } catch(...) {
+                    for(size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, arr + j);
+                    AllocatorTraits::deallocate(alloc, arr, cap);
+                    arr = nullptr;
+                    cap = sz = 0;
+                    throw;
+                }
+            } else {
+                DynamicArray temp(other, alloc);
+                swap(temp);
+            }
         }
         return *this;
     }
@@ -301,26 +323,52 @@ public:
      * @param d_arr Другой DynamicArray
      * @return DynamicArray& Ссылка на этот массив
      *
-     * @exception Не бросает исключений
+     * @exception Любые исключения от конструктора копирования T
      */
-    DynamicArray& operator = (DynamicArray&& d_arr) noexcept
-    {
-        if (this != &d_arr) {
-            if(arr != nullptr){                                                                  //
-                for(size_t i = 0; i < sz; ++i) AllocatorTraits::destroy(alloc, arr + i);         // old array destruction
-                AllocatorTraits::deallocate(alloc, arr, cap);                                    //
-                arr = nullptr;                                                                   //
-            }                                                                                    //
+    DynamicArray& operator = (DynamicArray&& other)
+    {   
+        if (this != &other) {
+            clear();
+            AllocatorTraits::deallocate(alloc, arr, cap);
 
-            sz = d_arr.sz;
-            cap = d_arr.cap;
-            arr = d_arr.arr;
-            alloc = std::move(d_arr.alloc);
+            if constexpr (AllocatorTraits::propagate_on_container_move_assignment::value) {
+                alloc = std::move(other.alloc);
+                arr = other.arr;
+                sz = other.sz;
+                cap = other.cap;
 
-            d_arr.sz = 0;
-            d_arr.cap = 0;
-            d_arr.arr = nullptr;
-            d_arr.alloc = Allocator();
+                other.arr = nullptr;
+                other.sz = 0;
+                other.cap = 0;
+            } else {
+                if (alloc == other.alloc) {
+                    arr = other.arr;
+                    sz = other.sz;
+                    cap = other.cap;
+
+                    other.arr = nullptr;
+                    other.sz = 0;
+                    other.cap = 0;
+                } else {
+                    reserve(other.sz);
+                    sz = other.sz;
+
+                    size_t i = 0;
+                    try {
+                        for (; i < sz; ++i) {
+                            AllocatorTraits::construct(alloc, arr + i, std::move_if_noexcept(other.arr[i]));
+                        }
+                    } catch (...) {
+                        for (size_t j = 0; j < i; ++j) {
+                            AllocatorTraits::destroy(alloc, arr + j);
+                        }
+                        sz = 0;
+                        throw;
+                    }
+
+                    other.clear();
+                }
+            }
         }
         return *this;
     }
@@ -341,10 +389,9 @@ public:
         T* newarr = AllocatorTraits::allocate(alloc, n);
 
         size_t i = 0;
-        try{
+        try {
             for (; i < sz; ++i) AllocatorTraits::construct(alloc, newarr + i, std::move_if_noexcept(arr[i]));
-        }
-        catch(const std::exception&) {
+        } catch (...) {
             for (size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, newarr + j);
             AllocatorTraits::deallocate(alloc, newarr, n);
             throw;
@@ -368,10 +415,9 @@ public:
         T* newarr = AllocatorTraits::allocate(alloc, sz);
 
         size_t i = 0;
-        try{
+        try {
             for (; i < sz; ++i) AllocatorTraits::construct(alloc, newarr + i, std::move_if_noexcept(arr[i]));
-        }
-        catch(const std::exception&) {
+        } catch (...) {
             for (size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, newarr + j);
             AllocatorTraits::deallocate(alloc, newarr, sz);
             throw;
@@ -502,9 +548,9 @@ public:
         } else if (sz < count) {
             if(count > cap) reserve(count);
             size_t i = sz;
-            try{
+            try {
                 for (; i < count; ++i) AllocatorTraits::construct(alloc, arr + i, value);
-            }catch(const std::exception&){
+            } catch (...) {
                 for (size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, arr + j);
                 throw;
             }
@@ -533,7 +579,7 @@ public:
             size_t i = sz;
             try {
                 for (; i < count; ++i) AllocatorTraits::construct(alloc, arr + i);
-            } catch (const std::exception&) {
+            } catch (...) {
                 for (size_t j = sz; j < i; ++j) AllocatorTraits::destroy(alloc, arr + j);
                 throw;
             }
@@ -723,7 +769,20 @@ public:
         std::swap(arr, other.arr);
         std::swap(sz, other.sz);
         std::swap(cap, other.cap);
+        if constexpr (AllocatorTraits::propagate_on_container_swap::value) {
+            swap(alloc, other.alloc);
+        }
     }
+
+    /**
+     * @brief Возвращает копию аллокатора.
+     *
+     * @return Allocator Копия аллокатора
+     *
+     * @exception Не бросает исключений
+     */
+    Allocator get_allocator() const noexcept { return alloc; }
+
 };
 
 } // namespace mystl
