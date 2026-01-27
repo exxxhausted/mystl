@@ -1,18 +1,17 @@
 #ifndef DYNAMICARRAY_HPP
 #define DYNAMICARRAY_HPP
 
-#include <type_traits>
 #include <stdexcept>
 #include <initializer_list>
 #include <concepts>
 
-// CURRENT VERSION v0.1.3
+// CURRENT VERSION v0.1.4
 
 // CHANGELOG:
-// >allocator-aware update
+// >added operator ==
 
                                          /* ПОДМЕНА АЛЛОКАТОРА НЕ ТЕСТИРОВАЛАСЬ */
-namespace mystl {         //                            /
+namespace mystl::containers {   //                      /
                           //                          |/_
 template<typename T, typename Allocator = std::allocator<T>>
 class DynamicArray {
@@ -33,8 +32,8 @@ private:
     class common_iterator {
     private:
 
-        using ConditionalPtr = std::conditional_t<IsConst, const T*, T*>;
-        using ConditionalRef = std::conditional_t<IsConst, const T&, T&>;
+        using ConditionalPtr  = std::conditional_t<IsConst, const T*, T*>;
+        using ConditionalRef  = std::conditional_t<IsConst, const T&, T&>;
         using ConditionalType = std::conditional_t<IsConst, const T, T>;
 
         ConditionalPtr ptr;
@@ -783,8 +782,23 @@ public:
      */
     Allocator get_allocator() const noexcept { return alloc; }
 
+    /**
+     * @brief operator ==
+     * @param other
+     * @return true, если элементы массивов совпадают, иначе - false
+     */
+    bool operator==(const DynamicArray& other) const noexcept {
+        if (sz != other.sz)
+            return false;
+
+        for (size_t i = 0; i < sz; ++i)
+            if (!(arr[i] == other.arr[i])) return false;
+
+        return true;
+    }
+
 };
 
-} // namespace mystl
+} // namespace mystl::containers
 
 #endif // DYNAMICARRAY_HPP

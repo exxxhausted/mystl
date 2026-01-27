@@ -1,5 +1,5 @@
-#ifndef MAP_HPP
-#define MAP_HPP
+#ifndef RBTREEMAP_HPP
+#define RBTREEMAP_HPP
 
 #include <functional>
 #include <stdexcept>
@@ -9,7 +9,7 @@
 // CHANGELOG:
 // >iterator bugfix
 
-namespace mystl {
+namespace mystl::containers {
 
 template<
     typename Key,//                      ПОДМЕНА АЛЛОКАТОРА НЕ ТЕСТИРОВАЛАСЬ
@@ -17,7 +17,7 @@ template<
     typename Compare = std::less<Key>,  //           |/_
     typename Allocator = std::allocator<std::pair<const Key, T>>
     >
-class Map {
+class RBTreeMap {
 private:
 
     using value_type = std::pair<const Key, T>;
@@ -81,13 +81,13 @@ private:
     class common_iterator {
     private:
 
-        using ConditionalPtr = std::conditional_t<IsConst, const value_type*, value_type*>;
-        using ConditionalRef = std::conditional_t<IsConst, const value_type&, value_type&>;
+        using ConditionalPtr  = std::conditional_t<IsConst, const value_type*, value_type*>;
+        using ConditionalRef  = std::conditional_t<IsConst, const value_type&, value_type&>;
         using ConditionalType = std::conditional_t<IsConst, const value_type, value_type>;
 
         //Внутренняя структора итератора задается указателями на узел дерева, а не указателями на value_type
         using ConditionalBaseNodePtr = std::conditional_t<IsConst, const BaseNode*, BaseNode*>;
-        using ConditionalNodePtr = std::conditional_t<IsConst, const Node*, Node*>;
+        using ConditionalNodePtr     = std::conditional_t<IsConst, const Node*, Node*>;
 
         ConditionalBaseNodePtr node_ptr_;
 
@@ -428,11 +428,12 @@ public:
     /**
      * @brief Деструктор
      */
-    ~Map() { clear(); }
+    ~RBTreeMap() { clear(); }
+
     /**
      * @brief Дефолт конструктор
      */
-    Map() noexcept : Map(Compare(), Allocator()) {}
+    RBTreeMap() noexcept : RBTreeMap(Compare(), Allocator()) {}
 
     /**
      * @brief Конструктор из компаратора и аллокатора
@@ -440,7 +441,7 @@ public:
      * @param comp - компаратор
      * @param alloc - аллокатор
      */
-    explicit Map(const Compare& comp,
+    explicit RBTreeMap(const Compare& comp,
                  const Allocator& alloc = Allocator()) noexcept:
         imaginary_(),
         size_(0),
@@ -454,7 +455,7 @@ public:
      *
      * @param alloc - аллокатор
      */
-    explicit Map(const Allocator& alloc) noexcept: Map(Compare(), alloc) {}
+    explicit RBTreeMap(const Allocator& alloc) noexcept: RBTreeMap(Compare(), alloc) {}
 
     /**
      * @brief Map - конструктор от диапазона
@@ -468,8 +469,8 @@ public:
      */
     template<typename InputIt>
     requires std::copy_constructible<std::pair<const Key, T>>
-    Map(InputIt first, InputIt last, const Compare& comp = Compare(), const Allocator& alloc = Allocator()) :
-        Map(comp, alloc)
+    RBTreeMap(InputIt first, InputIt last, const Compare& comp = Compare(), const Allocator& alloc = Allocator()) :
+        RBTreeMap(comp, alloc)
     {
         try {
             for(auto it = first; it != last; ++it) emplace(*it);
@@ -489,7 +490,7 @@ public:
      */
     template<typename InputIt>
     requires std::copy_constructible<std::pair<const Key, T>>
-    Map(InputIt first, InputIt last, const Allocator& alloc) : Map(first, last, Compare(), alloc) {}
+    RBTreeMap(InputIt first, InputIt last, const Allocator& alloc) : RBTreeMap(first, last, Compare(), alloc) {}
 
     /**
      * @brief Map - конструктор от std::initializer_list<std::pair<const Key, T>>
@@ -500,10 +501,10 @@ public:
      *
      * @exception Любые исключения от конструктора копирования Key, T
      */
-    Map(std::initializer_list<value_type> init,
+    RBTreeMap(std::initializer_list<value_type> init,
         const Compare& comp = Compare(),
         const Allocator& alloc = Allocator())
-        requires std::copy_constructible<std::pair<const Key, T>> : Map(comp, alloc)
+        requires std::copy_constructible<std::pair<const Key, T>> : RBTreeMap(comp, alloc)
     {
         try {
             for(auto v : init) emplace(v);
@@ -521,7 +522,7 @@ public:
      *
      * @exception Любые исключения от конструктора копирования Key, T
      */
-    Map(std::initializer_list<value_type> init, const Allocator& alloc) : Map(init, Compare(), alloc) {}
+    RBTreeMap(std::initializer_list<value_type> init, const Allocator& alloc) : RBTreeMap(init, Compare(), alloc) {}
 
     /**
      * @brief Конструктор копирования
@@ -530,7 +531,7 @@ public:
      *
      * @exception Любые исключения от конструктора копирования Key, T
      */
-    Map(const Map& other)
+    RBTreeMap(const RBTreeMap& other)
         requires std::copy_constructible<std::pair<const Key, T>> :
         imaginary_(),
         size_(0),
@@ -556,7 +557,7 @@ public:
      *
      * @exception Любые исключенеия от конструктора перемещения Key, T
      */
-    Map(Map&& other) :
+    RBTreeMap(RBTreeMap&& other) :
         imaginary_(),
         size_(0),
         comp_(std::move(other.comp_))
@@ -597,7 +598,6 @@ public:
                 }
             }
         }
-
         // Глубокое перемещение
         try {
             for(const auto& v : other) emplace(std::move(v));
@@ -619,9 +619,9 @@ public:
      *
      * @exception Любые исключенеия от конструктора перемещения Key, T
      */
-    Map& operator = (const Map& other) {
+    RBTreeMap& operator = (const RBTreeMap& other) {
         if (this != &other) {
-            Map temp(other);
+            RBTreeMap temp(other);
             *this = std::move(temp);
         }
         return *this;
@@ -636,7 +636,7 @@ public:
      *
      * @exception Любые исключенеия от конструктора перемещения Key, T
      */
-    Map& operator = (Map&& other) {
+    RBTreeMap& operator = (RBTreeMap&& other) {
         if (this == &other) {
             return *this;
         }
@@ -1631,7 +1631,7 @@ public:
      *
      * @param other - другая Map
      */
-    void swap(Map& other) {
+    void swap(RBTreeMap& other) {
         // Обмениваем корни деревьев
         std::swap(imaginary_.left_, other.imaginary_.left_);
 
@@ -1656,5 +1656,6 @@ public:
     Allocator get_allocator() const { return alloc_; }
 };
 
-}
-#endif // MAP_HPP
+} // namespace mystl::containers
+
+#endif // RBTREEMAP_HPP
