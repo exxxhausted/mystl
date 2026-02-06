@@ -5,12 +5,12 @@
 #include <initializer_list>
 #include <concepts>
 
-// CURRENT VERSION v0.1.4
+// CURRENT VERSION v0.1.5
 
 // CHANGELOG:
-// >added operator ==
+// >implementation has been simplified. Now it is not STL-like container.
 
-                                         /* ПОДМЕНА АЛЛОКАТОРА НЕ ТЕСТИРОВАЛАСЬ */
+                                         /* Not Allocator-aware! */
 namespace mystl::containers {   //                      /
                           //                          |/_
 template<typename T, typename Allocator = std::allocator<T>>
@@ -78,28 +78,28 @@ private:
             return copy;                                                                                //
         }                                                                                               //
 
-        common_iterator(const common_iterator& other) = default;                                     // Forward
-        common_iterator& operator=(const common_iterator& other) = default;                          // iterator
-                                                                                                     // properties
+        common_iterator(const common_iterator& other) = default;                                        // Forward
+        common_iterator& operator=(const common_iterator& other) = default;                             // iterator
+                                                                                                        // properties
 
-        common_iterator<IsConst>& operator -- () { --ptr; return *this; }                            // Bidirectional
-        common_iterator<IsConst> operator -- (int) {                                                 // iterator
-            common_iterator<IsConst> copy = *this;                                                   // properties
-            --(*this);                                                                               //
-            return copy;                                                                             //
-        };                                                                                           //
+        common_iterator<IsConst>& operator -- () { --ptr; return *this; }                               // Bidirectional
+        common_iterator<IsConst> operator -- (int) {                                                    // iterator
+            common_iterator<IsConst> copy = *this;                                                      // properties
+            --(*this);                                                                                  //
+            return copy;                                                                                //
+        };                                                                                              //
 
-        common_iterator<IsConst> operator + (difference_type n) { return common_iterator(ptr + n); } // Random
-        common_iterator<IsConst> operator - (difference_type n) { return common_iterator(ptr - n); } // access
-        common_iterator<IsConst>& operator += (difference_type n) { ptr += n; return *this; }        // iterator
-        common_iterator<IsConst>& operator -= (difference_type n) { ptr -= n; return *this; }        // properties
-        bool operator < (const common_iterator<IsConst>& other) const { return ptr < other.ptr; }    //
-        bool operator > (const common_iterator<IsConst>& other) const { return ptr > other.ptr; }    //
-        bool operator <= (const common_iterator<IsConst>& other) const { return ptr <= other.ptr; }  //
-        bool operator >= (const common_iterator<IsConst>& other) const { return ptr >= other.ptr; }  //
-        difference_type operator - (const common_iterator<IsConst>& other) const                     //
-        { return ptr - other.ptr; }                                                                  //
-        ConditionalRef operator [] (difference_type n) const { return ptr[n]; }                      //
+        common_iterator<IsConst> operator + (difference_type n) { return common_iterator(ptr + n); }    // Random
+        common_iterator<IsConst> operator - (difference_type n) { return common_iterator(ptr - n); }    // access
+        common_iterator<IsConst>& operator += (difference_type n) { ptr += n; return *this; }           // iterator
+        common_iterator<IsConst>& operator -= (difference_type n) { ptr -= n; return *this; }           // properties
+        bool operator < (const common_iterator<IsConst>& other) const { return ptr < other.ptr; }       //
+        bool operator > (const common_iterator<IsConst>& other) const { return ptr > other.ptr; }       //
+        bool operator <= (const common_iterator<IsConst>& other) const { return ptr <= other.ptr; }     //
+        bool operator >= (const common_iterator<IsConst>& other) const { return ptr >= other.ptr; }     //
+        difference_type operator - (const common_iterator<IsConst>& other) const                        //
+        { return ptr - other.ptr; }                                                                     //
+        ConditionalRef operator [] (difference_type n) const { return ptr[n]; }                         //
 
         /**
          * @brief Геттер, возвращающий сырой указатель
@@ -118,9 +118,11 @@ public:
 
     iterator begin() { return iterator(arr); }
     const_iterator begin() const { return const_iterator(arr); }
+    const_iterator cbegin() const { return begin(); }
 
     iterator end() { return iterator(arr + sz); }
     const_iterator end() const { return const_iterator(arr + sz); }
+    const_iterator cend() const { return end(); }
 
     //REVERSED ITERATOR BLOCK
 
@@ -129,9 +131,11 @@ public:
 
     reverse_iterator rbegin() { return reverse_iterator(end()); }
     const_reverse_iterator rbegin() const { return const_reverse_iterator(end()); }
+    const_reverse_iterator crbegin() const { return rbegin(); }
 
     reverse_iterator rend() { return reverse_iterator(begin()); }
     const_reverse_iterator rend() const { return const_reverse_iterator(begin()); }
+    const_reverse_iterator crend() const { return rend(); }
 
     //BASIC FUNCTIONAL BLOCK
 
@@ -209,6 +213,7 @@ public:
     {
         reserve(list.size());
         sz = list.size();
+
         size_t i = 0;
         try {
             for (const T& value : list) {
@@ -243,7 +248,7 @@ public:
      */
     DynamicArray(const DynamicArray& d_arr)
     requires std::copy_constructible<T>
-        : arr(nullptr), sz(0), cap(0), alloc(AllocatorTraits::select_on_container_copy_construction(d_arr.alloc))
+        : arr(nullptr), sz(0), cap(0), alloc(d_arr.alloc)
     {
         reserve(d_arr.cap);
         sz = d_arr.sz;
@@ -271,31 +276,8 @@ public:
     requires std::copyable<T>
     {
         if (this != &other) {
-            if constexpr (AllocatorTraits::propagate_on_container_copy_assignment::value) {
-                clear();
-                AllocatorTraits::deallocate(alloc, arr, cap);
-                arr = nullptr;
-                cap = 0;
-
-                alloc = other.alloc;
-
-                reserve(other.cap);
-                sz = other.sz;
-
-                size_t i = 0;
-                try {
-                    for(; i < sz; ++i) AllocatorTraits::construct(alloc, arr + i, other.arr[i]);
-                } catch(...) {
-                    for(size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, arr + j);
-                    AllocatorTraits::deallocate(alloc, arr, cap);
-                    arr = nullptr;
-                    cap = sz = 0;
-                    throw;
-                }
-            } else {
-                DynamicArray temp(other, alloc);
-                swap(temp);
-            }
+            DynamicArray temp(other);
+            swap(temp);
         }
         return *this;
     }
@@ -325,49 +307,18 @@ public:
      * @exception Любые исключения от конструктора копирования T
      */
     DynamicArray& operator = (DynamicArray&& other)
-    {   
+    {
         if (this != &other) {
             clear();
             AllocatorTraits::deallocate(alloc, arr, cap);
 
-            if constexpr (AllocatorTraits::propagate_on_container_move_assignment::value) {
-                alloc = std::move(other.alloc);
-                arr = other.arr;
-                sz = other.sz;
-                cap = other.cap;
+            arr = other.arr;
+            sz  = other.sz;
+            cap = other.cap;
 
-                other.arr = nullptr;
-                other.sz = 0;
-                other.cap = 0;
-            } else {
-                if (alloc == other.alloc) {
-                    arr = other.arr;
-                    sz = other.sz;
-                    cap = other.cap;
-
-                    other.arr = nullptr;
-                    other.sz = 0;
-                    other.cap = 0;
-                } else {
-                    reserve(other.sz);
-                    sz = other.sz;
-
-                    size_t i = 0;
-                    try {
-                        for (; i < sz; ++i) {
-                            AllocatorTraits::construct(alloc, arr + i, std::move_if_noexcept(other.arr[i]));
-                        }
-                    } catch (...) {
-                        for (size_t j = 0; j < i; ++j) {
-                            AllocatorTraits::destroy(alloc, arr + j);
-                        }
-                        sz = 0;
-                        throw;
-                    }
-
-                    other.clear();
-                }
-            }
+            other.arr = nullptr;
+            other.sz  = 0;
+            other.cap = 0;
         }
         return *this;
     }
@@ -389,7 +340,7 @@ public:
 
         size_t i = 0;
         try {
-            for (; i < sz; ++i) AllocatorTraits::construct(alloc, newarr + i, std::move_if_noexcept(arr[i]));
+            for (; i < sz; ++i) AllocatorTraits::construct(alloc, newarr + i, std::move(arr[i]));
         } catch (...) {
             for (size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, newarr + j);
             AllocatorTraits::deallocate(alloc, newarr, n);
@@ -415,7 +366,7 @@ public:
 
         size_t i = 0;
         try {
-            for (; i < sz; ++i) AllocatorTraits::construct(alloc, newarr + i, std::move_if_noexcept(arr[i]));
+            for (; i < sz; ++i) AllocatorTraits::construct(alloc, newarr + i, std::move(arr[i]));
         } catch (...) {
             for (size_t j = 0; j < i; ++j) AllocatorTraits::destroy(alloc, newarr + j);
             AllocatorTraits::deallocate(alloc, newarr, sz);
@@ -457,9 +408,7 @@ public:
     */
     void push_back(const T& value)
     requires std::copy_constructible<T>
-    {
-        emplace_back(value);
-    }
+    { emplace_back(value); }
 
     /**
     * @brief Добавляет элемент в конец массива (перемещение).
@@ -471,9 +420,7 @@ public:
     */
     void push_back(T&& value)
     requires std::movable<T>
-    {
-        emplace_back(std::move(value));
-    }
+    { emplace_back(std::move(value)); }
 
     //ERASE BLOCK
 
@@ -493,11 +440,9 @@ private:
 
         if (diff == 0) return end;
 
-        for (T* p = beg; p + diff < arr + sz; ++p)
-            *p = std::move_if_noexcept(*(p + diff));
+        for (T* p = beg; p + diff < arr + sz; ++p) *p = std::move(*(p + diff));
 
-        for (size_t i = 0; i < diff; ++i)
-            AllocatorTraits::destroy(alloc, arr + sz - 1 - i);
+        for (size_t i = 0; i < diff; ++i) AllocatorTraits::destroy(alloc, arr + sz - 1 - i);
 
         sz -= diff;
         return beg;
@@ -619,12 +564,12 @@ public:
         ++sz;
 
         try{
-            for (size_t i = sz - 1; i > insertion_id; --i) arr[i] = std::move_if_noexcept(arr[i - 1]);
+            for (size_t i = sz - 1; i > insertion_id; --i) arr[i] = std::move(arr[i - 1]);
 
             AllocatorTraits::construct(alloc, arr + insertion_id, std::forward<Args>(args)...);
         }
         catch(...) {
-            for (size_t i = sz - 1; i > insertion_id; --i) arr[i] = std::move_if_noexcept(arr[i - 1]);
+            for (size_t i = sz - 1; i > insertion_id; --i) arr[i] = std::move(arr[i - 1]);
             --sz;
             throw;
         }
@@ -642,7 +587,8 @@ public:
      * @exception Любые исключения от конструктора копирования T
      */
     iterator insert(const_iterator pos, const T& value)
-    requires std::copy_constructible<T> { return emplace(pos, value); }
+    requires std::copy_constructible<T>
+    { return emplace(pos, value); }
 
     /**
     * @brief Вставляет элемент в указанную позицию (перемещение).
@@ -655,7 +601,8 @@ public:
     * @exception Любые исключения от конструктора перемещения T
     */
     iterator insert(const_iterator pos, T&& value)
-    requires std::movable<T> { return emplace(pos, std::move(value)); }
+    requires std::movable<T>
+    { return emplace(pos, std::move(value)); }
 
     //ETC BLOCK
     /**
@@ -764,12 +711,11 @@ public:
     * @exception Не бросает исключений
     */
     void swap(DynamicArray& other) noexcept{
-        if(this == &other) return;
-        std::swap(arr, other.arr);
-        std::swap(sz, other.sz);
-        std::swap(cap, other.cap);
-        if constexpr (AllocatorTraits::propagate_on_container_swap::value) {
-            swap(alloc, other.alloc);
+        if(this != &other) {
+            std::swap(arr, other.arr);
+            std::swap(sz, other.sz);
+            std::swap(cap, other.cap);
+            std::swap(alloc, other.alloc);
         }
     }
 
@@ -787,7 +733,7 @@ public:
      * @param other
      * @return true, если элементы массивов совпадают, иначе - false
      */
-    bool operator==(const DynamicArray& other) const noexcept {
+    bool operator == (const DynamicArray& other) const noexcept {
         if (sz != other.sz)
             return false;
 
